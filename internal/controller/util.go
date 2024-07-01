@@ -12,14 +12,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	v1 "github.com/5GSEC/nimbus/api/v1"
+	v1alpha1 "github.com/5GSEC/nimbus/api/v1alpha1"
 )
 
 // TODO: Add constants for recommend labels and update objects accordingly.
 // https://kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/
 
 const (
-	StatusCreated = "Created"
+	StatusCreated        = "Created"
+	StatusValidationFail = "ValidationFail"
 )
 
 func doNotRequeue() (ctrl.Result, error) {
@@ -35,14 +36,14 @@ func extractBoundIntentsNameFromSib(ctx context.Context, c client.Client, name, 
 
 	var boundIntentsName []string
 
-	var sib v1.SecurityIntentBinding
+	var sib v1alpha1.SecurityIntentBinding
 	if err := c.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &sib); err != nil {
 		logger.Error(err, "failed to fetch SecurityIntentBinding", "securityIntentBindingName", name, "securityIntentBindingNamespace", namespace)
 		return boundIntentsName
 	}
 
 	for _, intent := range sib.Spec.Intents {
-		var si v1.SecurityIntent
+		var si v1alpha1.SecurityIntent
 		if err := c.Get(ctx, types.NamespacedName{Name: intent.Name}, &si); err == nil {
 			boundIntentsName = append(boundIntentsName, intent.Name)
 		}
@@ -55,20 +56,40 @@ func extractBoundIntentsNameFromCSib(ctx context.Context, c client.Client, name 
 
 	var boundIntentsName []string
 
-	var csib v1.ClusterSecurityIntentBinding
+	var csib v1alpha1.ClusterSecurityIntentBinding
 	if err := c.Get(ctx, types.NamespacedName{Name: name}, &csib); err != nil {
 		logger.Error(err, "failed to fetch ClusterSecurityIntentBinding", "ClusterSecurityIntentBinding", name)
 		return boundIntentsName
 	}
 
 	for _, intent := range csib.Spec.Intents {
-		var si v1.SecurityIntent
+		var si v1alpha1.SecurityIntent
 		if err := c.Get(ctx, types.NamespacedName{Name: intent.Name}, &si); err == nil {
 			boundIntentsName = append(boundIntentsName, intent.Name)
 		}
 	}
 
 	return boundIntentsName
+}
+
+func extractNPNamespacesFromCsib(ctx context.Context, c client.Client, name string) []string {
+	logger := log.FromContext(ctx)
+
+	var npNs []string
+
+	nps := &v1alpha1.NimbusPolicyList{}
+	if err := c.List(ctx, nps); err != nil {
+		logger.Error(err, "failed to list Nimbus Policies")
+		return nil
+	}
+
+	for _, np := range nps.Items {
+		if np.Name == "nimbus-ctlr-gen-"+name {
+			npNs = append(npNs, np.Namespace)
+		}
+	}
+
+	return npNs
 }
 
 func ownerExists(c client.Client, controllee client.Object) bool {
@@ -83,10 +104,10 @@ func ownerExists(c client.Client, controllee client.Object) bool {
 	var objToGet client.Object
 
 	switch controllee.(type) {
-	case *v1.NimbusPolicy:
-		objToGet = &v1.SecurityIntentBinding{}
-	case *v1.ClusterNimbusPolicy:
-		objToGet = &v1.ClusterSecurityIntentBinding{}
+	case *v1alpha1.NimbusPolicy:
+		objToGet = &v1alpha1.SecurityIntentBinding{}
+	case *v1alpha1.ClusterNimbusPolicy:
+		objToGet = &v1alpha1.ClusterSecurityIntentBinding{}
 	}
 
 	if err := c.Get(context.Background(), types.NamespacedName{Name: ownerName, Namespace: controllee.GetNamespace()}, objToGet); err != nil {
